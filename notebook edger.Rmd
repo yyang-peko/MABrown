@@ -1,0 +1,220 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(edgeR)
+library(limma)
+library(Glimma)
+library(org.Mm.eg.db)
+library(gplots)
+library(RColorBrewer)
+library(NMF)
+```
+
+```{r}
+#load files
+# Read the data into R
+seqdata <- read.csv("data/preprocessed_counts.csv", stringsAsFactors = FALSE)
+# Read the sample information into R
+sampleinfo <- read.delim("data/sample_info.txt", stringsAsFactors = TRUE)
+```
+
+
+```{r}
+head(seqdata)
+dim(seqdata)
+sampleinfo
+```
+```{r}
+countdata<- seqdata[,-(1:4)]
+ann <- seqdata[, 1:4]
+head(countdata)
+head(ann)
+
+```
+
+```{r}
+rownames(countdata) <- seqdata[,1]
+head(countdata)
+colnames(countdata) <- sampleinfo$SampleName
+table(colnames(countdata)==sampleinfo$SampleName)
+```
+```{r}
+y <- DGEList(countdata)
+y
+names(y)
+y$samples
+```
+
+```{r}
+group <- paste(sampleinfo$Sex,sampleinfo$Status,sep=".")
+group <- factor(group)
+group
+y$samples$group <- group
+y$samples
+```
+
+```{r}
+y$genes <- ann
+```
+
+```{r}
+myCPM <- cpm(countdata)
+head(myCPM)
+thresh <- myCPM > 1.0
+head(thresh)
+table(rowSums(thresh))
+```
+
+```{r}
+keep <- rowSums(thresh) >= 2
+summary(keep)
+y <- y[keep, keep.lib.sizes=FALSE]
+```
+
+```{r}
+y$samples$lib.size
+barplot(y$samples$lib.size/1e06, names=colnames(y), las=2, ann=FALSE, cex.names=0.75)
+mtext(side = 1, text = "Samples", line = 4)
+mtext(side = 2, text = "Library size (millions)", line = 3)
+title("Barplot of library sizes")
+```
+
+```{r}
+# Get log2 counts per million
+logcounts <- cpm(y,log=TRUE)
+# Check distributions of samples using boxplots
+boxplot(logcounts, xlab="", ylab="Log2 counts per million",las=2)
+# Let's add a blue horizontal line that corresponds to the median logCPM
+abline(h=median(logcounts),col="blue")
+title("Boxplots of logCPMs (unnormalised)")
+```
+
+```{r}
+y <- calcNormFactors(y)
+y$samples
+```
+
+
+```{r}
+design <- model.matrix(~ 0 + group)
+colnames(design) <- levels(group)
+design
+```
+```{r}
+par(mfrow=c(1,1))
+v <- voom(y,design,plot = TRUE)
+v
+names(v)
+
+par(mfrow=c(1,2))
+boxplot(logcounts, xlab="", ylab="Log2 counts per million",las=2,main="Unnormalised logCPM")
+## Let's add a blue horizontal line that corresponds to the median logCPM
+abline(h=median(logcounts),col="blue")
+boxplot(v$E, xlab="", ylab="Log2 counts per million",las=2,main="Voom transformed logCPM")
+## Let's add a blue horizontal line that corresponds to the median logCPM
+abline(h=median(v$E),col="blue")
+
+```
+
+```{r}
+fit <- lmFit(v)
+names(fit)
+```
+
+```{r}
+cont.matrix <- makeContrasts(M.IgE_vs_unstim=M.IgE - M.unstim, 
+                             F.IgE_vs_unstim=F.IgE - F.unstim,
+                             IgE.M_vs_F = M.IgE - F.IgE,
+                             unstim.M_vs_F = M.unstim - F.unstim,
+                             levels=design)
+cont.matrix
+
+
+```
+
+```{r}
+fit.cont <- contrasts.fit(fit, cont.matrix)
+fit.cont <- eBayes(fit.cont)
+dim(fit.cont)
+summa.fit <- decideTests(fit.cont)
+summary(summa.fit)
+```
+```{r}
+y <- estimateDisp(y)
+```
+
+```{r}
+et <- exactTest(y)
+topTags(et)
+```
+
+```{r}
+fit <- glmQLFit(y, design)
+```
+
+```{r}
+glmqlft <- glmQLFTest(fit, contrast=cont.matrix)
+```
+
+
+```{r}
+
+processed_y <- cbind(as.data.frame(y), glmqlft$table)
+processed_y$PValue_fdr <- p.adjust(method="fdr",p=processed_y$PValue)
+head(processed_y)
+
+```
+
+
+
+```{r}
+summary(glmqlft)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.

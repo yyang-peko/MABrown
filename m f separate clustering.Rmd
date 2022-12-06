@@ -1,0 +1,152 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(ggplot2)
+library(clustree)
+library(reshape2)
+library(PRROC)
+library(WriteXLS)
+library(rpart)
+library(stringr)
+library(rpart.plot)
+library(cowplot)
+library(EnhancedVolcano)
+library(multtest)
+library(metap)
+library(presto)
+library(tictoc)
+library(ComplexHeatmap)
+library(SeuratWrappers)
+```
+```{r warning=FALSE}
+
+m_raw = Read10X('./Matrix Files/M/filtered_feature_bc_matrix/')
+f_raw = Read10X('./Matrix Files/F/filtered_feature_bc_matrix/')
+
+m_data = data.frame(matrix(data=NA, nrow=ncol(m_raw), ncol=1))
+rownames(m_data) <- colnames(m_raw)
+colnames(m_data) <- c("M")
+
+f_data = data.frame(matrix(data=NA, nrow=ncol(f_raw), ncol=1))
+rownames(f_data) <- colnames(f_raw)
+colnames(f_data) <- c("F")
+
+```
+
+```{r}
+m_ser <- CreateSeuratObject(counts = m_raw, meta.data=m_data)
+f_ser <- CreateSeuratObject(counts = f_raw, meta.data=f_data)
+```
+
+
+
+```{r}
+m_ser <- PercentageFeatureSet(m_ser, pattern = "^mt-", col.name = "perc.Mito")
+m_ser <- PercentageFeatureSet(m_ser, pattern = "^Rpl", col.name = "perc.Rpl")
+m_ser <- PercentageFeatureSet(m_ser, pattern = "^Rps", col.name = "perc.Rps")
+m_ser <- PercentageFeatureSet(m_ser, pattern = "^Hba", col.name = "perc.Hba")
+m_ser <- PercentageFeatureSet(m_ser, pattern = "^Hbb", col.name = "perc.Hbb")
+m_ser <- PercentageFeatureSet(m_ser, pattern = "^Ptprc", col.name = "perc.Cd45")
+m_ser <- PercentageFeatureSet(m_ser, pattern = "^Fcer1a", col.name = "perc.FC")
+VlnPlot(m_ser, features=c("perc.Mito", "perc.Hba", "perc.Hbb", "perc.Rpl", "perc.Rps", "perc.Cd45", "perc.FC"), ncol=7, pt.size = 0.1) + NoLegend()
+
+f_ser <- PercentageFeatureSet(f_ser, pattern = "^mt-", col.name = "perc.Mito")
+f_ser <- PercentageFeatureSet(f_ser, pattern = "^Rpl", col.name = "perc.Rpl")
+f_ser <- PercentageFeatureSet(f_ser, pattern = "^Rps", col.name = "perc.Rps")
+f_ser <- PercentageFeatureSet(f_ser, pattern = "^Hba", col.name = "perc.Hba")
+f_ser <- PercentageFeatureSet(f_ser, pattern = "^Hbb", col.name = "perc.Hbb")
+f_ser <- PercentageFeatureSet(f_ser, pattern = "^Ptprc", col.name = "perc.Cd45")
+f_ser <- PercentageFeatureSet(f_ser, pattern = "^Fcer1a", col.name = "perc.FC")
+VlnPlot(f_ser, features=c("perc.Mito", "perc.Hba", "perc.Hbb", "perc.Rpl", "perc.Rps", "perc.Cd45", "perc.FC"), ncol=7, pt.size = 0.1) + NoLegend()
+```
+
+```{r}
+m_ser <- subset(m_ser, subset = perc.Mito < 10 & perc.Hba < 5 & perc.Hbb < 5 & perc.Cd45 > 0)
+f_ser <- subset(f_ser, subset = perc.Mito < 10 & perc.Hba < 5 & perc.Hbb < 5 & perc.Cd45 > 0)
+
+for (val in c(m_ser, f_ser))
+  {val <- val[!grepl("MALAT1", rownames(val)), ] #hemoglobin gene
+  val <- val[!grepl("^Hb[^(P)]", rownames(val)), ]
+  val <- val[!grepl("^Rpl[^(P)]", rownames(val)), ]
+  val <- val[!grepl("^Rps[^(P)]", rownames(val)), ]
+}
+
+
+```
+
+
+```{r message=FALSE}
+m_ser <- SCTransform(m_ser, vars.to.regress = c("nCount_RNA", "perc.Mito"), return.only.var.genes = FALSE)
+f_ser <- SCTransform(f_ser, vars.to.regress = c("nCount_RNA", "perc.Mito"), return.only.var.genes = FALSE)
+```
+
+
+```{r fig.height=5, fig.width=5}
+m_ser <- RunPCA(m_ser)
+m_ser <- RunUMAP(m_ser, dims = 1:30)
+m_ser <- FindNeighbors(m_ser, dims = 1:30)
+m_ser<- FindClusters(m_ser, resolution=0.1)
+
+DimPlot(m_ser, reduction="umap", label=TRUE)
+
+f_ser <- RunPCA(f_ser)
+f_ser <- RunUMAP(f_ser, dims = 1:30)
+f_ser <- FindNeighbors(f_ser, dims = 1:30)
+f_ser <- FindClusters(f_ser, resolution=0.1)
+
+DimPlot(f_ser, reduction="umap", label=TRUE)
+```
+
+
+```{r fig.height=35, fig.width=20}
+m_markers <-  RunPrestoAll(object = m_ser, only.pos = TRUE, assay="SCT", slot="scale.data", min.diff.pct = 0.4)
+m_top5 <- m_markers %>% group_by(cluster) %>% top_n(5, avg_diff)
+VlnPlot(m_ser, features = m_top5$gene, ncol = 5)+ NoLegend()
+
+f_markers <-  RunPrestoAll(object = f_ser, only.pos = TRUE, assay="SCT", slot="scale.data", min.diff.pct = 0.4)
+f_top5 <- f_markers %>% group_by(cluster) %>% top_n(5, avg_diff)
+VlnPlot(f_ser, features = f_top5$gene, ncol = 5)+ NoLegend()
+```
+
+
+
+```{r}
+DoHeatmap(subset(m_ser, downsample=100), features = m_top5$gene, angle=90, draw.lines = F) + scale_fill_gradient(low="white", high="red4")
+DoHeatmap(subset(f_ser, downsample=100), features = f_top5$gene, angle=90, draw.lines = F) + scale_fill_gradient(low="white", high="red4")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

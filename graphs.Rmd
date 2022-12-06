@@ -1,0 +1,104 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(Seurat)
+library(dplyr)
+library(patchwork)
+library(ggplot2)
+```
+
+```{r}
+ser <- load("ser.obj2.RData")
+```
+
+```{r}
+DimPlot(ser.obj, reduction="umap", label=TRUE, repel=TRUE)
+```
+```{r}
+DimPlot(ser.obj, reduction="umap", label=TRUE, repel=TRUE, group.by="sample")
+```
+
+```{r}
+DimPlot(ser.obj, reduction="umap", label=TRUE, repel=TRUE, split.by="sample")
+```
+
+```{r}
+p <- FeaturePlot(ser.obj, 
+                 features=c("Fcer1a", "Il33", "Il7r", "Ly6g", "Cxcr2", "Cd14", "Cd4", "Cd8a"), 
+                 combine=FALSE, 
+                 split.by = "sample",
+                 label=TRUE,
+                 repel=TRUE,
+                 label.size = 2,
+                 pt.size = 1.5)
+
+p <- lapply(X=p, FUN = function(x) x + theme(plot.title= element_text(size=8)) + 
+                                       theme(axis.title.y= element_text(size=8)) + 
+                                       theme(axis.title.x= element_text(size=8)) + 
+                                       theme(axis.text.y= element_text(size=5)) + 
+                                       theme(axis.text.x= element_text(size=5)) + 
+                                       theme(legend.position='none'))
+p
+```
+```{r fig.height=20, fig.width=20}
+p <- FeaturePlot(ser.obj, 
+                 features=c("Fcer1a", "Il33", "Il7r", "Ly6g", "Cxcr2", "Cd14", "Cd4", "Cd8a"), 
+                 combine=FALSE, 
+                 split.by = "sample",
+                 label.size = 2,
+                 pt.size = 1.5)
+
+p <- lapply(X=p, FUN = function(x) x + theme(plot.title= element_text(size=8)) + 
+                                       theme(axis.title.y= element_text(size=8)) + 
+                                       theme(axis.title.x= element_text(size=8)) + 
+                                       theme(axis.text.y= element_text(size=5)) + 
+                                       theme(axis.text.x= element_text(size=5)) + 
+                                       theme(legend.position='none'))
+
+CombinePlots(p)
+```
+
+
+```{r fig.height=10, fig.width=20}
+VlnPlot(ser.obj, features = c("Fcer1a", "Il33", "Il7r", "Ly6g", "Cxcr2", "Cd14", "Cd4", "Cd8a"),
+        pt.size = 1.5,
+        ncol=4)
+
+```
+
+```{r fig.height=10, fig.width=20}
+VlnPlot(ser.obj, features = c("Fcer1a", "Il33", "Il7r", "Ly6g", "Cxcr2", "Cd14", "Cd4", "Cd8a"),
+        split.by="sample",
+        pt.size = 1.5,
+        ncol=4,
+        split.plot = TRUE)
+
+```
+```{r fig.height=10, fig.width=20}
+VlnPlot(ser.obj, features = c("Cd25", "Cd45", "Cd90", "Cd127", "Cd161", "Icos", "Il17", "Tslp", "Klrg1", "Irf8", "Fceri"),
+        split.by="sample",
+        pt.size = 1.5,
+        ncol=4,
+        split.plot = TRUE)
+
+```
+```{r}
+ser.markers <- FindAllMarkers(ser.obj)
+```
+
+```{r fig.height=20, fig.width=20}
+ser.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 10, wt = avg_log2FC) -> top10
+DoHeatmap(ser.obj, features = top10$gene) + NoLegend()
+```
+
+
+

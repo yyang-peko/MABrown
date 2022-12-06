@@ -1,0 +1,238 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(ggplot2)
+library(clustree)
+library(reshape2)
+library(PRROC)
+library(WriteXLS)
+library(rpart)
+library(stringr)
+library(rpart.plot)
+library(IKAP)
+library(cowplot)
+library(EnhancedVolcano)
+```
+
+
+```{r}
+paths = c('./Matrix Files/M/filtered_feature_bc_matrix/', './Matrix Files/F/filtered_feature_bc_matrix/')
+raw_data = Read10X(paths)
+sample_data = data.frame(matrix(data=NA, nrow=ncol(raw_data), ncol=1))
+rownames(sample_data) <- colnames(raw_data)
+colnames(sample_data) <- c("sex")
+
+```
+
+```{r}
+sample_data[grep("^1", rownames(sample_data)), "sex"] <- "M"
+sample_data[grep("^2", rownames(sample_data)), "sex"] <- "F"
+```
+
+
+```{r}
+ser.obj <- CreateSeuratObject(counts = raw_data, meta.data=sample_data)
+ser.obj <- PercentageFeatureSet(ser.obj, pattern = "^mt-", col.name = "perc.Mito")
+ser.obj <- PercentageFeatureSet(ser.obj, pattern = "^Rpl", col.name = "perc.Rpl")
+ser.obj <- PercentageFeatureSet(ser.obj, pattern = "^Rps", col.name = "perc.Rps")
+ser.obj <- PercentageFeatureSet(ser.obj, pattern = "^Hba", col.name = "perc.Hba")
+ser.obj <- PercentageFeatureSet(ser.obj, pattern = "^Hbb", col.name = "perc.Hbb")
+```
+
+SC transform, removes mitochondrial, ribosomal, hemoglobin
+
+```{r}
+ser1 <- SCTransform(ser.obj, vars.to.regress = c("nCount_RNA", "perc.Mito"))
+```
+```{r}
+ser1 <- NormalizeData(ser1)
+ser1 <- FindVariableFeatures(ser1)
+ser1 <- ScaleData(ser1)
+
+```
+
+
+
+```{r}
+VlnPlot(ser1, features=c("nFeature_RNA", "nCount_RNA", "perc.Mito", "perc.Rpl", "perc,Rps", "perc.Hba", "perc.Hbb"))
+
+#quality control        
+```
+```{r}
+ser2 <- RunPCA(ser1)
+ElbowPlot(ser2, n=50)
+
+```
+```{r}
+ser2 <- RunUMAP(ser2, dims = 1:30)
+ser2 <- FindNeighbors(ser2, dims = 1:30)
+ser2 <- FindClusters(ser2, resolution=0.5)
+
+DimPlot(ser2, reduction="umap", label=TRUE, split.by="sex")
+DimPlot(ser2, reduction="umap", label=TRUE)
+```
+
+```{r}
+markers <- FindAllMarkers(object = ser2, only.pos = TRUE, return.thresh = 0.0001)
+markers %>% group_by(cluster) %>% top_n(2, avg_log2FC)
+top3 <- markers %>% group_by(cluster) %>% top_n(3, avg_log2FC)
+
+FeaturePlot(ser2, features = top3$gene, ncol = 6)
+```
+
+```{r fig.height=60, fig.width=20}
+top5 <- markers %>% group_by(cluster) %>% top_n(5, avg_log2FC)
+
+VlnPlot(ser2, features = top5$gene, ncol = 4)+ NoLegend()
+```
+
+```{r}
+ser3=subset(ser2, idents=c('0','1','2','3','4','5','8','9','12','13','14'))
+```
+
+```{r}
+ser3 <- SCTransform(ser3, vars.to.regress = c("nCount_RNA", "perc.Mito"))
+ser3 <- NormalizeData(ser3)
+ser3 <- FindVariableFeatures(ser3)
+ser3 <- ScaleData(ser3)
+
+ser3 <- RunPCA(ser3)
+ElbowPlot(ser3, n=50)
+```
+
+```{r}
+ser3 <- RunUMAP(ser3,reduction="pca",dims=1:30)
+ser3 <- FindNeighbors(ser3,reduction="pca",dims=1:30)
+ser3 <- FindClusters(ser3,resolution=0.5)
+```
+
+```{r fig.height=15, fig.width=15}
+DimPlot(ser3, reduction="umap", label=TRUE, split.by="sex", label.size = 5, pt.size = 1.5)
+DimPlot(ser3, reduction="umap", label=TRUE, label.size = 5, pt.size = 1.5)
+DimPlot(ser3, reduction="umap", group.by="sex", pt.size = 1.5)
+
+```
+
+```{r fig.height=15, fig.width=15}
+markers <- FindAllMarkers(object = ser3, only.pos = F, return.thresh = 0.5, logfc.threshold=0.01, min.pct=0.01)
+markers %>% group_by(cluster) %>% top_n(2, avg_log2FC)
+top3 <- markers %>% group_by(cluster) %>% top_n(3, avg_log2FC)
+
+FeaturePlot(ser3, features = top3$gene, ncol = 6)+ NoLegend()
+```
+```{r fig.height=30, fig.width=15}
+VlnPlot(ser3, features = top5$gene, ncol = 4)+ NoLegend()
+```
+```{r}
+genes_of_interest <- c("Kit", "Fcer1a", "Cd34", "Il33", "Xcl1", "Atf3", "Csf1", "Cd14", "Icos", "Il13", "Mcpt4", "Ccl4", "Ccl3", "Cd82", "Il7r", "Cd52", "Itgam", "Itgal", "Il12a", "Fas", "Ccr5", "Ly6g", "Igf1", "Mmp8", "Hdac1", "Ccl17", "Tgm2", "Cxcl12", "Pycard", "Msr1", "Cpn1", "Cybb", "Sell", "Tnfsf10", "Tnfsf9", "Cd226", "Ctsl", "Ccl2", "Ahr", "Lingo1", "Notch1", "Trpm2", "Tslp")
+```
+
+
+```{r fig.height=30, fig.width=15}
+VlnPlot(ser3, features=genes_of_interest, split.by = "sex")
+```
+
+```{r fig.height=40, fig.width=15}
+FeaturePlot(ser3, features=genes_of_interest) & 
+  theme(plot.title= element_text(size=8),
+        axis.title.y= element_text(size=10),
+        axis.title.x= element_text(size=8),
+        axis.text.y= element_text(size=5),
+        axis.text.x= element_text(size=5),
+        legend.position='none')
+```
+
+
+```{r fig.height=20, fig.width=15}
+RidgePlot(ser3, features=genes_of_interest, ncol=6)+ NoAxes(keep.ticks = TRUE) & 
+  theme(plot.title= element_text(size=8),
+        axis.title.y= element_text(size=10),
+        axis.title.x= element_text(size=8),
+        axis.text.y= element_text(size=5),
+        axis.text.x= element_text(size=5),
+        legend.position='none')
+```
+
+```{r fig.height=8, fig.width=15}
+DotPlot(ser3, features=genes_of_interest) + RotatedAxis()
+```
+
+```{r fig.height=8, fig.width=15}
+DoHeatmap(subset(ser3, downsample=1000), features=genes_of_interest, size=5)
+```
+
+
+```{r}
+cluster11 <- subset(ser3, idents = 11)
+Idents(cluster11) <- "sex"
+avg.cluster11 <- log1p(AverageExpression(cluster11, verbose = FALSE)$RNA)
+avg.cluster11$gene <- rownames(avg.cluster11)
+```
+
+```{r fig.height=5, fig.width=15}
+DotPlot(cluster11, features=genes_of_interest) + RotatedAxis()
+```
+
+
+
+
+```{r fig.height=10, fig.width=10}
+c11markers <- FindMarkers(cluster11, ident.1 = 'M', group.by = 'sex',  return.thresh = 0.5, logfc.threshold=0.01, min.pct=0.01)
+p1 = EnhancedVolcano(c11markers, x='avg_log2FC', y='p_val', lab=rownames(c11markers), pCutoff = 0.05, FCcutoff = 0.5)
+p1
+```
+
+
+
+```{r fig.height=10, fig.width=10}
+c11markers <- subset(c11markers, p_val > 1e-05) 
+p1 = EnhancedVolcano(c11markers, x='avg_log2FC', y='p_val', lab=rownames(c11markers), pCutoff = 0.05, FCcutoff = 0.5)
+p1
+```
+
+
+
+
+
+```{r}
+csubset(c11markers, p_val > 1e-05)
+       
+       
+       #c("Xist", "Hbb-bs", "Hba-a1", "Hba-a2", "mt-Nd2", "mr-Nd4", "Hbb-bt"))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

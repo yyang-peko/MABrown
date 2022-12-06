@@ -1,0 +1,288 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r include=FALSE}
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(ggplot2)
+library(clustree)
+library(reshape2)
+library(PRROC)
+library(WriteXLS)
+library(rpart)
+library(stringr)
+library(rpart.plot)
+library(cowplot)
+library(EnhancedVolcano)
+library(multtest)
+library(metap)
+library(presto)
+library(tictoc)
+suppressPackageStartupMessages(library(ComplexHeatmap))
+library(ComplexHeatmap)
+library(SeuratWrappers)
+```
+```{r}
+paths = c('./Matrix Files/M/filtered_feature_bc_matrix/', './Matrix Files/F/filtered_feature_bc_matrix/')
+raw_data = Read10X(paths)
+sample_data = data.frame(matrix(data=NA, nrow=ncol(raw_data), ncol=1))
+rownames(sample_data) <- colnames(raw_data)
+colnames(sample_data) <- c("sex")
+
+sample_data[grep("^1", rownames(sample_data)), "sex"] <- "M"
+sample_data[grep("^2", rownames(sample_data)), "sex"] <- "F"
+
+ser <- CreateSeuratObject(counts = raw_data, meta.data=sample_data)
+table(ser@meta.data$sex)
+```
+
+```{r fig.width=10}
+ser <- PercentageFeatureSet(ser, pattern = "^mt-", col.name = "perc.Mito")
+ser <- PercentageFeatureSet(ser, pattern = "^Rpl", col.name = "perc.Rpl")
+ser <- PercentageFeatureSet(ser, pattern = "^Rps", col.name = "perc.Rps")
+ser <- PercentageFeatureSet(ser, pattern = "^Hba", col.name = "perc.Hba")
+ser <- PercentageFeatureSet(ser, pattern = "^Hbb", col.name = "perc.Hbb")
+ser <- PercentageFeatureSet(ser, pattern = "^Ptprc", col.name = "perc.Cd45")
+ser <- PercentageFeatureSet(ser, pattern = "^Kit", col.name = "perc.Kit")
+```
+
+
+```{r}
+ser <- subset(ser, subset = perc.Mito < 10 & perc.Hba < 5 & perc.Hbb < 5 & perc.Cd45 > 0)
+#ser=subset(ser, idents=c('0','1','2','3','4', '5', '8','9','12','13', '14'))
+ser <- ser[!grepl("MALAT1", rownames(ser)), ] #hemoglobin gene
+ser <- ser[!grepl("^mt-", rownames(ser)), ]
+ser <- ser[!grepl("^Hb[^(P)]", rownames(ser)), ]
+ser <- ser[!grepl("^Rp[^(P)]", rownames(ser)), ]
+#ser <- ser[!grepl("^Rps[^(P)]", rownames(ser)), ]
+table(ser@meta.data$sex)
+```
+
+```{r include=FALSE}
+ser <- SCTransform(ser, vars.to.regress = c("nCount_RNA", "perc.Mito"), return.only.var.genes = FALSE)
+#ser <- SCTransform(ser, vars.to.regress = c("nCount_RNA"))
+ser <- NormalizeData(ser)
+ser <- FindVariableFeatures(ser)
+ser <- ScaleData(ser)
+```
+
+```{r fig.height=5, fig.width=10}
+ser <- RunPCA(ser)
+ser <- RunUMAP(ser, dims = 1:30)
+ser <- FindNeighbors(ser, dims = 1:30)
+ser <- FindClusters(ser, resolution=0.1)
+```
+
+```{r fig.height=6, fig.width=6}
+DimPlot(ser, reduction="umap", repel=TRUE, pt.size = 0.8, group.by = 'sex') +ggtitle("3507 Female cells and 9581 Male cells")
+```
+
+```{r fig.height=6, fig.width=6}
+new.cluster.ids <- c("Neutrophil", "Neutrophil", "Neutrophil", "B cell/Macs", "T cell", "Basophil/Mast cell")
+names(new.cluster.ids) <- levels(ser)
+ser.label <- RenameIdents(ser, new.cluster.ids)
+DimPlot(ser.label, reduction = "umap", label = TRUE, label.size = 5, repel=TRUE, pt.size = 0.8) + NoLegend()+ggtitle("13088 cells")
+```
+
+
+
+
+```{r fig.height=5, fig.width=10}
+
+genes_of_interest <- c("Fcer1a", "Mcpt8", #cluster 5 MCs and Basophils
+                       "Ms4a4b", "Cd3e", #cluster 4 T cells
+                       "Ebf1", "Adgre1",#cluster 3 B cells
+                       "Fcgr1", #cluster 3 Monocytes Macrophages
+                       "Ngp", "Ltf", "Camp"
+
+                       
+)
+
+DotPlot(ser, features = unique(genes_of_interest)) + RotatedAxis()  
+DoHeatmap(subset(ser, downsample=50), features = genes_of_interest, angle=90, draw.lines = F, assay="SCT") + scale_fill_gradient(low="white", high="red4")
+VlnPlot(ser, features = genes_of_interest, ncol = 5, split.by = 'sex')+ NoLegend()
+FeaturePlot(ser, features = genes_of_interest, ncol = 5)+ NoLegend()
+```
+
+
+```{r}
+md <- ser@meta.data %>% as.data.table
+md[, .N, by = c("sex", "seurat_clusters")] %>% dcast(., sex ~ seurat_clusters, value.var = "N")
+```
+
+
+```{r fig.height=15, fig.width=8}
+
+genes_of_interest <- c("Fcer1a", "Mcpt8", #cluster 5 MCs and Basophils
+                       "Ms4a4b", "Cd3e", #cluster 4 T cells
+                       "Ebf1", "Adgre1",#cluster 3 B cells
+                       "Fcgr1", #cluster 3 Monocytes Macrophages
+                       "Ngp", "Ly6g", "Lrg1"
+
+                       
+)
+
+#DotPlot(ser, features = unique(genes_of_interest)) + RotatedAxis()  
+#DoHeatmap(subset(ser, downsample=50), features = genes_of_interest, angle=90, draw.lines = F, slot = "data") + scale_fill_gradient(low="white", high="purple")
+#VlnPlot(ser, features = genes_of_interest, ncol = 5, split.by = 'sex')+ NoLegend()
+FeaturePlot(ser, features = genes_of_interest, ncol = 2, pt.size=1.2)+ NoLegend()
+```
+
+```{r}
+cat(rownames(markers_012), sep="\n")
+```
+
+```{r}
+markersmvf <- RunPresto(object=ser, ident.1='M', ident.2='F', group.by = "sex", logfc.threshold = 0.1)
+```
+
+```{r fig.height=8, fig.width=10}
+
+EnhancedVolcano(markersmvf, 
+                x='avg_log2FC', 
+                y='p_val_adj', 
+                lab=rownames(markersmvf), 
+                pCutoff= 0.001, 
+                FCcutoff = 0.35, 
+                title='F vs M all clusters',
+                gridlines.major = F,
+                gridlines.minor = F,
+                pointSize = 3,
+                labSize = 5,
+                xlim = c(-1.5, 1.5),
+                colAlpha = 1,
+                col = c('black', 'black', 'black', 'red'),
+                legendLabels=c("Not sig.", "log2FC threshold = 0.35", "p < 0.001", "Sig."),
+                legendLabSize = 12,
+                legendIconSize = 3,
+                drawConnectors = T,
+                widthConnectors = 0.3
+                )
+
+```
+```{r}
+markers_xd_012 <- RunPresto(object=ser, group.by = 'sex', ident.1='M', ident.2='F' , logfc.threshold = 0.3, subset.ident = c(0, 1, 2))
+markers_xd_3 <- RunPresto(object=ser, group.by = 'sex', ident.1='M', ident.2='F' , logfc.threshold = 0.3, subset.ident = 3)
+markers_xd_4 <- RunPresto(object=ser, group.by = 'sex', ident.1='M', ident.2='F' , logfc.threshold = 0.3, subset.ident = 4)
+markers_xd_5 <- RunPresto(object=ser, group.by = 'sex', ident.1='M', ident.2='F' , logfc.threshold = 0.3, subset.ident = 5)
+```
+
+
+```{r fig.height=8, fig.width=10}
+
+EnhancedVolcano(markers_xd_5, 
+                x='avg_log2FC', 
+                y='p_val', 
+                lab=rownames(markers_xd_5), 
+                pCutoff= 0.001, 
+                FCcutoff = 0.5, 
+                title='F vs M Basophils/MCs',
+                gridlines.major = F,
+                gridlines.minor = F,
+                pointSize = 2.5,
+                labSize = 5,
+                xlim = c(-2, 2),
+                ylim = c(0, 6),
+                colAlpha = 1,
+                col = c('black', 'black', 'black', 'red'),
+                legendLabels=c("Not sig.", "log2FC threshold = 0.5", "p < 0.001", "Sig."),
+                legendLabSize = 12,
+                legendIconSize = 3,
+                drawConnectors = T,
+                widthConnectors = 0.3,
+                maxoverlapsConnectors = 20
+                )
+
+```
+
+```{r}
+fc_thresh <- 0.35
+p_thresh <- 0.05
+
+nrow(markers_xd_5 %>% filter(avg_log2FC < -1* fc_thresh, p_val < p_thresh))
+nrow(markers_xd_5 %>% filter(avg_log2FC > fc_thresh, p_val < p_thresh))
+
+nrow(markers_xd_4 %>% filter(avg_log2FC < -1* fc_thresh, p_val < p_thresh))
+nrow(markers_xd_4 %>% filter(avg_log2FC > fc_thresh, p_val < p_thresh))
+
+nrow(markers_xd_3 %>% filter(avg_log2FC < -1* fc_thresh, p_val < p_thresh))
+nrow(markers_xd_3 %>% filter(avg_log2FC > fc_thresh, p_val < p_thresh))
+
+nrow(markers_xd_012 %>% filter(avg_log2FC < -1* fc_thresh, p_val < p_thresh))
+nrow(markers_xd_012 %>% filter(avg_log2FC > fc_thresh, p_val < p_thresh))
+
+nrow(markersmvf %>% filter(avg_log2FC < -1* fc_thresh, p_val < p_thresh))
+nrow(markersmvf %>% filter(avg_log2FC > fc_thresh, p_val < p_thresh))
+```
+
+```{r}
+cat(rownames(markers_xd_012 %>% filter(avg_log2FC > fc_thresh, p_val < p_thresh)), sep="\n")
+cat("\n \n")
+cat(rownames(markers_xd_012%>% filter(avg_log2FC < -1* fc_thresh, p_val < p_thresh)), sep="\n")
+```
+
+
+
+
+
+
+```{r fig.height=10, fig.width=15}
+gene_list <- c("Il1b", "Il1r1", "Il1rap", "Mapk14", "Mapk11", "Mapk12", "Mapk13", "Mtor", "Irf4", "Tgfb1", "Tgfbr1", "Tgfbr2", "Smad2", "Smad3", "Smad4", "Il21", "Il21r", "Il2rg", "Jak1", "Jak3", "Il6", "Il6ra", "Il6st", "Jak2", "Il23a", "Il23r", "Il12rb1", "Tyk2", "Stat3", "Rorc", "Rora", "Hif1a", "Hsp90aa1", "Hsp90ab1", "Ahr", "Il17a", "Il17f", "Il22", "Il22b", "H2-Aa", "H2-Ab1", "H2-Eb1", "H2-DMa", "H2-DMb1", "H2-DMb2", "H2-Oa", "H2-Ob", "H2-Ea", "H2-Eb2", "Cd4", "Lck", "Cd3e", "Cd3g", "Cd247", "Cd3d", "Zap70", "Lat", "Plcg1", "Ppp3cc", "Ppp3ca", "Ppp3cb", "Ppp3r1", "Ppp3r2", "Nfatc1", "Nfatc2", "Nfatc3", "Prkcq", "Chuk", "Ikbkb", "Ikbkg", "Nfkbia", "Nfkbib", "Nfkbie", "Nfkb1", "Rela", "Mapk1", "Mapk3", "Fos", "Mapk8", "Mapk9", "Mapk10", "Jun", "Il4", "Il4ra", "Stat6", "Gata3", "Runx1", "Il27", "Ebi3", "Il27ra", "Ifng", "Ifngr1", "Ifngr2", "Stat1", "Tbx21", "Il2", "Il2ra", "Il2rb", "Stat5a", "Stat5b", "Foxp3", "Rara", "Rxra", "Rxrb", "Rxrg")
+#DoHeatmap(subset(ser, downsample=50), features = gene_list, group.by = 'sex') + scale_fill_gradient(low="white", high="red")
+DotPlot(ser, features = gene_list, split.by = 'sex', dot.scale = 10)+ theme(axis.text.x = element_text(angle = 90, hjust=1))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
